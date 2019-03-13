@@ -1,214 +1,172 @@
 #include <iostream>
 #include <fstream>
-#include <stdlib.h>
-#include <stdint.h>
-#include <assert.h>
-#include <vector>
 #include <algorithm>
 #include <math.h>
 #include <limits>
 #include <queue>
-#include <utility>
-#include <chrono>
-#include <iomanip>
+
+#include <stdlib.h>
+#include <stdint.h>
+#include <assert.h>
+#include <vector>
+
 #include <thread>
 #include <stdlib.h>
 #include <mutex>
 #include <iterator>
 #include <memory>
-using namespace std;
 
-// Global Variables
+#include <utility>
+#include <iomanip>
+
+using namespace std;
+using namespace std :: chrono;
+
+// uint64_t  credited to sir on his mail
+// Global Variables sue me
+
 uint64_t NUM_QUERIES = 0;
 uint64_t QUERY_DIMS = 0;
 uint64_t K = 0;
-uint64_t TRAINING_FILE_ID = 0;
-uint64_t QUERY_FILE_ID = 0;
-uint64_t TRAIN_PTS = 0;
-uint64_t TRAIN_DIMS = 0;
 unsigned int num_threads = 0;
 unsigned int MAX_THREADS = 0;
-vector<uint64_t> queries_per_thread;
-vector<thread> tree_threads;
-mutex mtx;
+vector<uint64_t> num_queries_per_thread;
+vector<thread> threads_tree;
+uint64_t TF_ID= 0;
+uint64_t QF_ID= 0;
+uint64_t TRAIN_PTS = 0;
+uint64_t TRAIN_DIMS = 0;
+mutex mut_x;
 
-// STRUCT/CLASS DEFINITIONS
-/* --------------------------------------------------------------------- */
-struct Point {
-		vector<float> coords;
+// NO VECTOR OF VECTORS, I SUCK AT THAT, MAKE POINTS NOT VECTORS  //SLOGAN 101
+struct Point 
+{
+		vector<float> coordinates;
 		~Point() {}
 };
 
-/* --------------------------------------------------------------------- */
-class FixedQueue
+//QUEUE TO HELP WITH KNN
+class Queue
 {
-	private:
-		uint64_t fixed_size;
-		vector<pair<Point*, float>> neighbors;
 	public:
-		FixedQueue(uint64_t sz) : fixed_size{sz} {}
-		~FixedQueue() {}
+		Queue(uint64_t sz) : fixed_size{sz} {}
+		~Queue() {}
+		
+		//stanford notes referred for help in priority queue
 		void insert_if_nearer(pair<Point*, float>);
-		static bool cmpDist(pair<Point*, float> p1, pair<Point*, float> p2)
+		
+		static bool compareDistance(pair<Point*, float> p1, pair<Point*, float> p2)
 		{
+			//figured out this is better than if else
 			return p1.second < p2.second;
 		}
-		vector<pair<Point*, float>> get_neighbors() { return neighbors; }
-		uint64_t size() { return neighbors.size(); }
-		float get_max() { return neighbors[neighbors.size()-1].second; }
-		bool not_full() { return neighbors.size() < K; }
+
+		bool full_checker() 
+		{ 
+			//stop when you have found enough neighbors
+			return neighbours.size() < K; 
+		}
+
+		vector<pair<Point*, float>> get_neighbours() 
+		{ 
+			return neighbours; 
+		}
+
+		uint64_t size() 
+		{ 
+			return neighbours.size(); 
+		}
+
+		float get_max() 
+		{
+			return neighbours[neighbours.size()-1].second; 
+		}
+
+		//no modi-fying these values
+	private:
+		uint64_t fixed_size;
+		vector<pair<Point*, float>> neighbours;
+		
 };
 
-void FixedQueue::insert_if_nearer(pair<Point*, float> temp)
+void Queue::insert_if_nearer(pair<Point*, float> temp)
 {
 	// If Queue full, check to see if new point is smaller than biggest entry
-	if (this->neighbors.size() == this->fixed_size)
+	if (this->neighbours.size() == this->fixed_size)
 	{
-		if (temp.second < neighbors[fixed_size-1].second)
+		if (temp.second < neighbours[fixed_size-1].second)
 		{
-			neighbors[fixed_size-1] = temp;
-			sort(this->neighbors.begin(), this->neighbors.end(), this->cmpDist);
+			neighbours[fixed_size-1] = temp;
+			sort(this->neighbours.begin(), this->neighbours.end(), this->compareDistance);
 		}
 	}
 	// If not full just throw it in there
 	else
 	{
-		this->neighbors.push_back(temp);
-		sort(this->neighbors.begin(), this->neighbors.end(), this->cmpDist);
+		this->neighbours.push_back(temp);
+		sort(this->neighbours.begin(), this->neighbours.end(), this->compareDistance);
 	}
 }
 
-/* --------------------------------------------------------------------- */
-// Node class for representing the KD-Tree - basically a binary tree
+// k-dimension tree, cmu notes
+
 class Node {
-    private:
-        Point* point;
-		Node *left_child;
-		Node *right_child;
+    //make it accessible
     public:
-		// Constructor
+		
         Node(Point* p) : point{p}, left_child{nullptr}, right_child{nullptr} {}
 		~Node() {}
-		vector<float> get_coords() { return point->coords; }
-		float get_coords(uint64_t i) { return point->coords[i]; }
-		Node* get_left() { return left_child; }
-		Node* get_right() { return right_child; }
-		void insert_left(Node* child) { this->left_child = child; }
-		void insert_right(Node* child) { this->right_child = child; }
-		void query(Point *q, Node *n, int dim, FixedQueue* cur_neighbors);
+		vector<float> get_coordinates() 
+		{ 	
+			return point->coordinates; 
+		}
+		float get_coordinates(uint64_t i) 
+		{
+			return point->coordinates[i]; 
+		}
+		Node* get_left() 
+		{ 
+			return left_child; 
+		}
+		Node* get_right() 
+		{ 
+			return right_child; 
+		}
+		void insert_left(Node* child) 
+		{ 
+			this->left_child = child; 
+		}
+		void insert_right(Node* child) 
+		{ 
+			this->right_child = child;
+		}
+		void query(Point *q, Node *n, int dimension, Queue* cur_neighbours);
+
+	
+	//aint nobody gonna access that 
+	private:
+        	Point* point;
+			Node *left_child;
+			Node *right_child;
 };
 
-/* --------------------------------------------------------------------- */
-// Implement class to allow passing dimension for comparison in contructor
-class cmp 
+// Implement class to allow passing dimension to compare
+
+class compare 
 {
 	public:
-		cmp(int d) : dim(d) {}
+		compare(int d) : dimension(d) {}
 		bool operator()(Point* p1, Point* p2) 
 		{
-			return p1->coords[dim] < p2->coords[dim];
+			return p1->coordinates[dimension] < p2->coordinates[dimension];
     	}
 	private:
-    	int dim;
+    	int dimension;
 };
 
-/* --------------------------------------------------------------------- */
-/* HELPER FUNCTIONS	*/
-void write_output_file(const char* filename, vector<vector<pair<Point*, float>>>* nearest_neighbors_vec)
-{
-	ofstream outfile (filename, ios::binary); // open in binary mode
-	// Invalid file handling
-	if(!outfile)
-	{
-		cout << "No file named " << filename << endl;
-		exit(1);
-	}
+// Some useful tools
 
-	char filetype[8] = "RESULT";
-	ifstream random_file ("/dev/urandom", ios::in|ios::binary); // open in binary mode
-	static char buff[8];
-	random_file.read(buff, 8);
-	uint64_t result_file_ID = *((uint64_t*) buff);
-
-	outfile.write(reinterpret_cast<const char *> (&filetype), sizeof(filetype));
-	outfile.write(reinterpret_cast<const char *> (&TRAINING_FILE_ID), sizeof(TRAINING_FILE_ID));
-	outfile.write(reinterpret_cast<const char *> (&QUERY_FILE_ID), sizeof(QUERY_FILE_ID));
-	outfile.write(reinterpret_cast<const char *> (&result_file_ID), sizeof(result_file_ID));
-	outfile.write(reinterpret_cast<const char *> (&NUM_QUERIES), sizeof(NUM_QUERIES));
-	outfile.write(reinterpret_cast<const char *> (&TRAIN_DIMS), sizeof(TRAIN_DIMS));
-	outfile.write(reinterpret_cast<const char *> (&K), sizeof(K));
-	for (uint64_t q = 0; q < NUM_QUERIES; q++)
-	{
-		for(uint64_t i = 0; i < K; i++)
-		{
-			for(uint64_t j = 0; j < QUERY_DIMS; j++)
-			{
-				outfile.write(reinterpret_cast<const char *> (&((*nearest_neighbors_vec)[q][i].first->coords[j])), sizeof(float));
-			}
-		}
-	}
-	outfile.close();
-}
-
-vector<Point*> read_query_file(char* filename)
-{
-	static char buff[8] = {}; // Buffer for reading data from file
-	ifstream file (filename, ios::in|ios::binary); // open in binary mode
-
-	// Invalid file handling
-	if(!file)
-	{
-		cout << "No file named " << filename << endl;
-		exit(1);
-	}
-
-	cout << "\n----QUERY_FILE RESULTS----" << endl;
-	// Read in header data from file
-	file.read(buff, 8);
-	string filetype(buff);
-	cout << filetype << endl;
-
-	file.read(buff, 8);
-	QUERY_FILE_ID = *((uint64_t*) buff);
-	cout << "QUERY FILE ID: " << QUERY_FILE_ID << endl;
-
-	file.read(buff, 8);
-	NUM_QUERIES = *((uint64_t*) buff);
-	cout << "NUM_QUERIES: " << NUM_QUERIES << endl;
-
-	file.read(buff, 8);
-	QUERY_DIMS = *((uint64_t*) buff);
-	cout << "QUERY_DIMS: " << QUERY_DIMS << endl;
-	assert(QUERY_DIMS == TRAIN_DIMS);
-
-	file.read(buff, 8);
-	K = *((uint64_t*) buff);
-	cout << "K: " << K << endl;
-	assert(K > 0);
-
-	// Create vector of size # training points
-	vector<Point*> data;
-
-	// For each training point, get each dimension, then add it to vector
-	for(uint64_t i = 0; i < NUM_QUERIES; i++)
-	{
-		Point* temp = new Point();
-		for(uint64_t j = 0; j < QUERY_DIMS; j++)
-		{
-			// Read each 32bit float coordinate dimension
-			file.read(buff, 4);
-			temp->coords.push_back(*((float*) buff));
-		}
-		data.push_back(temp);
-	}
-	file.close();
-
-	cout << "Number of query points in vector: " << data.size() << endl;
-	assert(data.size() == NUM_QUERIES);
-	return data;
-}
-
-
+//start with reading training file
 shared_ptr<vector<Point*>> read_training_file(char* filename)
 {
 	static char buff[8] = {}; // Buffer for reading data from file
@@ -217,20 +175,20 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 	// Invalid file handling
 	if(!file)
 	{
-		cout << "No file named " << filename << endl;
+		cout << "No file named " << filename << "exists"<< endl;
 		exit(1);
 	}
 
-	cout << "----TRAINING_FILE RESULTS----" << endl;
-	// Read in header data from file
+	cout << "_______TRAINING_FILE RESULTS______" << endl;
+	// Read in header data from file, 8*8 == 64
 	file.read(buff, 8);
 	string filetype(buff);
-	cout << filetype << endl;
+	//filetype is written up top, no need to do it twice
 
 	file.read(buff, 8);
 	string fid(buff);
-	TRAINING_FILE_ID = *((uint64_t*) buff);
-	cout << "TRAINING_FILE_ID: " << TRAINING_FILE_ID << endl;
+	TF_ID= *((uint64_t*) buff);
+	cout << "TRAINING_FILE_ID: " << TF_ID<< endl;
 
 	file.read(buff, 8);
 	TRAIN_PTS = *((uint64_t*) buff);
@@ -249,9 +207,9 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 		Point* temp = new Point();
 		for(uint64_t j = 0; j < TRAIN_DIMS; j++)
 		{
-			// Read each 32bit float coordinate dimension
+			// 8 * 4 == 32
 			file.read(buff, 4);
-			temp->coords.push_back(*((float*) buff));
+			temp->coordinates.push_back(*((float*) buff));
 		}
 		data->push_back(temp);
 	}
@@ -262,13 +220,114 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 	return data;
 }
 
+
+//then you read query
+vector<Point*> read_query_file(char* filename)
+{
+	static char buff[8] = {}; // Buffer for reading data from file
+	ifstream file (filename, ios::in|ios::binary); // open in binary mode
+
+	// Invalid file handling
+	if(!file)
+	{
+		cout << "No file named " << filename << endl;
+		exit(1);
+	}
+
+	cout << "\n_____QUERY_FILE RESULTS____" << endl;
+	// Read in header data from file
+	file.read(buff, 8);
+	string filetype(buff);
+	cout << filetype << endl;
+
+	file.read(buff, 8);
+	QF_ID= *((uint64_t*) buff);
+	cout << "QUERY FILE ID: " << QF_ID<< endl;
+
+	file.read(buff, 8);
+	NUM_QUERIES = *((uint64_t*) buff);
+	cout << "NUM_QUERIES: " << NUM_QUERIES << endl;
+
+	file.read(buff, 8);
+	QUERY_DIMS = *((uint64_t*) buff);
+	cout << "QUERY_DIMS: " << QUERY_DIMS << endl;
+	assert(QUERY_DIMS == TRAIN_DIMS);
+
+	file.read(buff, 8);
+	K = *((uint64_t*) buff);
+	cout << "K: " << K << endl;
+	assert(K > 0);
+
+	// Create vector of size # training points
+	vector<Point*> data;
+
+	// For each training point, get dimension, then add it to vector
+	for(uint64_t i = 0; i < NUM_QUERIES; i++)
+	{
+		Point* temp = new Point();
+		for(uint64_t j = 0; j < QUERY_DIMS; j++)
+		{
+			// Read each 32bit float coordinate dimension
+			file.read(buff, 4);
+			temp->coordinates.push_back(*((float*) buff));
+		}
+		data.push_back(temp);
+	}
+	file.close();
+
+	cout << "Number of query points in vector: " << data.size() << endl;
+	assert(data.size() == NUM_QUERIES);
+	return data;
+}
+
+//write output
+void write_output_file(const char* filename, vector<vector<pair<Point*, float>>>* nearest_neighbours_vec)
+{
+	ofstream outfile (filename, ios::binary); // open in binary mode
+	// file handler if file is invalid
+	if(!outfile)
+	{
+		cout << "Not gonna write there... " << filename << endl;
+		exit(1);
+	}
+
+	char filetype[8] = "RESULT";
+	//no retyping at cout
+	ifstream random_file ("/dev/urandom", ios::in|ios::binary); // open in binary mode
+	static char buff[8];
+	random_file.read(buff, 8);
+	uint64_t result_file_ID = *((uint64_t*) buff);
+
+	outfile.write(reinterpret_cast<const char *> (&TF_ID), sizeof(TF_ID));
+	outfile.write(reinterpret_cast<const char *> (&QF_ID), sizeof(QF_ID));
+
+	outfile.write(reinterpret_cast<const char *> (&filetype), sizeof(filetype));
+	outfile.write(reinterpret_cast<const char *> (&result_file_ID), sizeof(result_file_ID));
+	outfile.write(reinterpret_cast<const char *> (&NUM_QUERIES), sizeof(NUM_QUERIES));
+
+	outfile.write(reinterpret_cast<const char *> (&TRAIN_DIMS), sizeof(TRAIN_DIMS));
+	outfile.write(reinterpret_cast<const char *> (&K), sizeof(K));
+
+	for (uint64_t q = 0; q < NUM_QUERIES; q++)
+	{
+		for(uint64_t i = 0; i < K; i++)
+		{
+			for(uint64_t j = 0; j < QUERY_DIMS; j++)
+			{
+				outfile.write(reinterpret_cast<const char *> (&((*nearest_neighbours_vec)[q][i].first->coordinates[j])), sizeof(float));
+			}
+		}
+	}
+	outfile.close();
+}
+
 // Returns index of median along given dimension
-int find_median(shared_ptr<vector<Point*>> subarray, int dimension)
+int find_median(shared_ptr<vector<Point*>> subarray, int dimension_median)
 {
 	if (subarray->size() > 1)
 	{
 		// Sort points in array by the values of the current dimension
-		sort(subarray->begin(), subarray->end(), cmp(dimension));
+		sort(subarray->begin(), subarray->end(), compare(dimension_median));
 	}
 	if (subarray->size() % 2 == 0)
 	{
@@ -280,137 +339,154 @@ int find_median(shared_ptr<vector<Point*>> subarray, int dimension)
 	}
 }
 
-void build_left_sequential(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-void build_right_sequential(Node* parent, shared_ptr<vector<Point*>> data, int dim);
+void build_left_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_right_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
 
-void build_left_sequential(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+
+void build_left_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
-	// Add median point as left child to parent
-	Node* split = new Node(median_point);
+	// Add median point as left child
+	split = new Node(median_point);
 	parent->insert_left(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
 	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
 
-	build_left_sequential(split, left, (dim+1) % TRAIN_DIMS);
-	build_right_sequential(split, right, (dim+1) % TRAIN_DIMS);
+	build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+	build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 
 }
 
-void build_right_sequential(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_right_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 	
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
-	// Add median point as right child to parent
-	Node* split = new Node(median_point);
+	// Add median point as right child
+	split = new Node(median_point);
 	parent->insert_right(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
 	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
 
-	build_left_sequential(split, left, (dim+1) % TRAIN_DIMS);
-	build_right_sequential(split, right, (dim+1) % TRAIN_DIMS);
+	build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+	build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 }
 
 
-void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-
-void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 
 	// Add median point as left child to parent
-	Node* split = new Node(median_point);
+	split = new Node(median_point);
 	parent->insert_left(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
 	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
 
 	// Lock mutex so multiple threads don't enter if statement
-	unique_lock<mutex> lck(mtx);
+	unique_lock<mutex> lck(mut_x);
 	if (num_threads < MAX_THREADS)
 	{
-		tree_threads.push_back(thread(build_left, split, left, (dim+1) % TRAIN_DIMS));
+		threads_tree.push_back(thread(build_left, split, left, (dimension+1) % TRAIN_DIMS));
 		num_threads++;
 		lck.unlock();
-		build_right(split, right, (dim+1) % TRAIN_DIMS);
+		build_right(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 	else
 	{
 		lck.unlock();
-		build_left_sequential(split, left, (dim+1) % TRAIN_DIMS);
-		build_right_sequential(split, right, (dim+1) % TRAIN_DIMS);
+		build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+		build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 }
 
-void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
-	// Add median point as right child to parent
-	Node* split = new Node(median_point);
+	// Add median point as right child
+	split = new Node(median_point);
 	parent->insert_right(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
-	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
+	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin() + median_index+1, data->end()));
 
-	// Lock mutex so multiple threads don't enter if statement
-	unique_lock<mutex> lck(mtx);
+	// Lock mutex to prevent access to critical region 
+	unique_lock<mutex> lck(mut_x);
 	if (num_threads < MAX_THREADS)
 	{
-		tree_threads.push_back(thread(build_left, split, left, (dim+1) % TRAIN_DIMS));
+		threads_tree.push_back(thread(build_left, split, left, (dimension+1) % TRAIN_DIMS));
 		num_threads++;
 		lck.unlock();
-		build_right(split, right, (dim+1) % TRAIN_DIMS);
+		build_right(split, right, (dimension+1) % TRAIN_DIMS);
 	}
+	
 	else
 	{
 		lck.unlock();
-		build_left_sequential(split, left, (dim+1) % TRAIN_DIMS);
-		build_right_sequential(split, right, (dim+1) % TRAIN_DIMS);
+		build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+		build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 }
 
-// Traverse tree in post-order to delete all nodes
+// Traverse tree to delete all nodes
 void delete_kd_tree(Node* current)
 {
 	if (current != nullptr)
@@ -421,13 +497,13 @@ void delete_kd_tree(Node* current)
 	}
 }
 
-// Traverse tree in pre-order to print all nodes
+// Traverse tree to print all nodes
 void print_kd_tree(Node* current, string dir, int level)
 {
 	cout << dir << level << ": ";
 	for(uint64_t j = 0; j < TRAIN_DIMS; j++)
 	{
-		 cout << current->get_coords(j) << "  ";
+		 cout << current->get_coordinates(j) << "  ";
 	}
 	cout << endl;
 
@@ -441,19 +517,19 @@ void print_kd_tree(Node* current, string dir, int level)
 	}
 }
 
-float dist(Point* p1, Point* p2)
+float distance(Point* p1, Point* p2)
 {
-	float total = 0.0;
-	float diff = 0.0;
+	float sum = 0.0;
+	float difference = 0.0;
 	for (uint64_t i = 0; i < QUERY_DIMS; i++)
 	{
-		diff = p1->coords[i] - p2->coords[i];
-		total += diff*diff;
+		difference = p1->coordinates[i] - p2->coordinates[i];
+		sum += difference*difference;
 	}
-	return sqrt(total);
+	return sqrt(sum);
 }
 
-void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbors) 
+void Node::query(Point *q, Node *n, int dimension, Queue* cur_neighbours) 
 {
 	if (n == nullptr) 
 	{
@@ -461,63 +537,67 @@ void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbors)
 	}
 
 	// Index of next dimension to consider (one level down).
-	int next_dim = (dim + 1) % TRAIN_DIMS;
+	int next_dim = (dimension + 1) % TRAIN_DIMS;
 
-	float d = dist(q, n->point);
-	cur_neighbors->insert_if_nearer(make_pair(n->point, d));
+	float d = distance(q, n->point);
+	cur_neighbours->insert_if_nearer(make_pair(n->point, d));
 
-	if (q->coords[dim] <= n->point->coords[dim]) 
+	if (q->coordinates[dimension] <= n->point->coordinates[dimension]) 
 	{
-		query(q, n->left_child, next_dim, cur_neighbors);
+		query(q, n->left_child, next_dim, cur_neighbours);
+		
 		// Is the hyperplane closer?
-		if (n->point->coords[dim] - q->coords[dim] < cur_neighbors->get_max() ||
-			cur_neighbors->not_full()) 
+		
+		if (n->point->coordinates[dimension] - q->coordinates[dimension] < cur_neighbours->get_max() ||
+			cur_neighbours->full_checker()) 
 		{
-			query(q, n->right_child, next_dim, cur_neighbors);
+			query(q, n->right_child, next_dim, cur_neighbours);
 		}
 	} 
+
 	else 
+
 	{
-		query(q, n->right_child, next_dim, cur_neighbors);
+		query(q, n->right_child, next_dim, cur_neighbours);
 		// Is the hyperplane closer?
-		if (q->coords[dim] - n->point->coords[dim] < cur_neighbors->get_max() ||
-			cur_neighbors->not_full()) 
+		if (q->coordinates[dimension] - n->point->coordinates[dimension] < cur_neighbours->get_max() ||
+			cur_neighbours->full_checker()) 
 		{
-			query(q, n->left_child, next_dim, cur_neighbors);
+			query(q, n->left_child, next_dim, cur_neighbours);
 		}
 	}
 }
 
-void dispatch_query_threads(int thread_num, vector<Point*>* query_data, 
-					Node* root, vector<FixedQueue*>* fq_vec, 
-					vector<vector<pair<Point*, float>>>* nearest_neighbors_vec)
+void dispatch_query_threads(int thread_num, vector<Point*>* query_data,	Node* root, vector<Queue*>* fq_vec, 
+						vector<vector<pair<Point*, float>>>* nearest_neighbours_vec)
 {
-	uint64_t queries_to_do = queries_per_thread[thread_num];
+	uint64_t queries_to_do = num_queries_per_thread[thread_num];
 	uint64_t base = 0;
 	for (int i = 0; i < thread_num; i++)
 	{
-		base += queries_per_thread[i];
+		base += num_queries_per_thread[i];
 	}
 	for (uint64_t q = 0; q < queries_to_do; q++)
 	{
 		uint64_t index = base + q;
-		(*fq_vec)[index] = new FixedQueue(K);
+		(*fq_vec)[index] = new Queue(K);
 		root->query((*query_data)[index], root, 0, (*fq_vec)[index]);
-	 	(*nearest_neighbors_vec)[index] = (*fq_vec)[index]->get_neighbors();
+	 	(*nearest_neighbours_vec)[index] = (*fq_vec)[index]->get_neighbours();
 	}
 }
 
 int main(int argc, char* argv[])
 {
-	if(argc < 5)
+	if(argc != 5)
 	{
 		cout << "Execution format: ./a.out <num_cores> <training_file> <query_file> <results_file>" << endl;
+		cout << "Error"<< endl; 
 		exit(1);
 	}
 	// Assign command-line args
 	int num_cores = atoi(argv[1]); 
 	assert(num_cores > 0);
-	MAX_THREADS = num_cores;
+	MAX_THREADS = 2 * num_cores;
 	char* training_file = argv[2];
 	char* query_file = argv[3];
 	char* results_file = argv[4];
@@ -555,49 +635,51 @@ int main(int argc, char* argv[])
 
 	// Call subfunctions to recursively split each half of the training_data
 	num_threads = 1;
-	tree_threads.push_back(thread(build_left, root, left, 1 % TRAIN_DIMS));
+	threads_tree.push_back(thread(build_left, root, left, 1 % TRAIN_DIMS));
 	build_right(root, right, 1 % TRAIN_DIMS);
 	
 	// Handle cleaning up the threads
-	cout << "\n----BUILDING K-D TREE----" << endl;
+	cout << "\n____BUILDING K-D TREE____" << endl;
 
 	while (num_threads != MAX_THREADS)
 	{
 		continue;
 	}
-	while (num_threads != tree_threads.size())
+	while (num_threads != threads_tree.size())
 	{
 		continue;
 	}
 
 	cout << "All threads created!" << endl;
-	cout << "Joining Tree Threads now..." << endl;
+	cout << "Joining Threads now..." << endl;
 
 	for (unsigned int i = 0; i < MAX_THREADS; i++)
 	{
 		//cout << "Joining thread " << i+1 << "/" << MAX_THREADS << endl;
-		if (tree_threads[i].joinable())
+		if (threads_tree[i].joinable())
 		{
-			tree_threads[i].join();
+			threads_tree[i].join();
 		}
 	}
-	cout << "All threads joined!" << endl;
+
+	//jedi, I am
+	cout << "All joined, threads are" << endl;
 
 	stop = chrono::high_resolution_clock::now();
 	dt = stop - start;
-	cout << "Time to build KD-Tree: " << dt.count() << endl;
+	cout << "Time to build Tree: " << dt.count() << endl;
 
-	cout << "\n----QUERYING TREE----" << endl;
+	cout << "\n____QUERYING TREE____" << endl;
 	// CHECKING FILE DATA
 	cout << "Number of query points in vector: " << query_data.size() << endl;
 	assert(query_data.size() == NUM_QUERIES);
+
+	// vec of vectors. Just hate doing this, but No dynamic arrays now
+	vector<vector<pair<Point*, float>>> nearest_neighbours_vec(NUM_QUERIES);	
+
+	// Priority Queue of pairs 
+	vector<Queue*> fq_vec(NUM_QUERIES);
 	
-	// Priority Queue of pairs based on comparator for distances in pair
-	vector<FixedQueue*> fq_vec(NUM_QUERIES);
-	// vec of vectors of nearest neighbors
-	vector<vector<pair<Point*, float>>> nearest_neighbors_vec(NUM_QUERIES);
-
-
 	// Get start time for all queries
 	start = chrono::high_resolution_clock::now();
 
@@ -608,14 +690,14 @@ int main(int argc, char* argv[])
 	}
 
 	// Initialize to most even distribution of queries
-	queries_per_thread = vector<uint64_t>(MAX_THREADS, (int) NUM_QUERIES/MAX_THREADS);
+	num_queries_per_thread = vector<uint64_t>(MAX_THREADS, (int) NUM_QUERIES/MAX_THREADS);
 	// Get remainder of the division
 	uint64_t temp = NUM_QUERIES % MAX_THREADS;
 	unsigned int i = 0;
 	// Add 1 to each thread's workload until remainder is gone
 	while (temp != 0)
 	{
-		queries_per_thread[i]++;
+		num_queries_per_thread[i]++;
 		temp--;
 		i++;
 	}
@@ -625,7 +707,7 @@ int main(int argc, char* argv[])
 	vector<thread> query_threads;
 	for (i = 0; i < MAX_THREADS; i++)
 	{
-		query_threads.push_back(thread(dispatch_query_threads, i, &query_data, root, &fq_vec, &nearest_neighbors_vec));
+		query_threads.push_back(thread(dispatch_query_threads, i, &query_data, root, &fq_vec, &nearest_neighbours_vec));
 		this_thread::sleep_for(chrono::milliseconds(1));
 	}
 
@@ -637,34 +719,14 @@ int main(int argc, char* argv[])
 	stop = chrono::high_resolution_clock::now();
 	dt = stop - start;
 
-// PRINT OUT ALL NEAREST NEIGHBORS FOR EACH QUERY
-/*	for (uint64_t q = 0; q < NUM_QUERIES; q++)
-	{
-		cout << "\n----NEAREST NEIGHBORS for query" << q+1 << "----\n" << endl;
-		cout << "Number of nearest neighbors actually found: " << nearest_neighbors_vec[q].size() << endl;
-		cout << "Number of nearest neighbors supposed to be found: " << K << endl;
-		cout.precision(3);
-		cout << fixed;
-		//for(uint64_t i = 0; i < K; i++)
-		for(uint64_t i = 0; i < K; i++)
-		{
-			for(uint64_t j = 0; j < QUERY_DIMS; j++)
-			{
-				cout << nearest_neighbors_vec[q][i].first->coords[j] << "   ";
-			}
-			cout << "Distance: " << nearest_neighbors_vec[q][i].second << endl;
-		}
-	}
-*/	
-
 	cout << "Time to query KD-Tree for all queries: " << dt.count() << endl;
 
-	cout << "\n----RESULTS FILE----" << endl;
+	cout << "\n____RESULTS FILE____" << endl;
 	cout << "Writing results file..." << endl;
 
 	start = chrono::high_resolution_clock::now();
 
-	write_output_file(results_file, &nearest_neighbors_vec);
+	write_output_file(results_file, &nearest_neighbours_vec);
 
 	stop = chrono::high_resolution_clock::now();
 	dt = stop - start;
@@ -672,7 +734,7 @@ int main(int argc, char* argv[])
 
 
 	// CLEAN UP REMAINING POINTERS
-	cout << "\n----CLEANING UP----" << endl;
+	cout << "\n____CLEANING UP____" << endl;
 	cout << "Deleting training data..." << endl;
 	for (uint64_t i = 0; i < TRAIN_PTS; i++)
 	{
@@ -683,12 +745,11 @@ int main(int argc, char* argv[])
 	for (uint64_t i = 0; i < NUM_QUERIES; i++)
 	{
 		delete fq_vec[i];
-delete
- query_data[i];
+		delete query_data[i];
 	}
 
 	cout << "Deleting tree data...\n" << endl;
 	delete_kd_tree(root);
-
 	return 0;
+
 }
