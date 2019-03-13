@@ -17,10 +17,10 @@
 #include <memory>
 
 #include <utility>
-#include <chrono>
 #include <iomanip>
 
 using namespace std;
+using namespace std :: chrono;
 
 // uint64_t  credited to sir on his mail
 // Global Variables sue me
@@ -31,17 +31,17 @@ uint64_t K = 0;
 unsigned int num_threads = 0;
 unsigned int MAX_THREADS = 0;
 vector<uint64_t> num_queries_per_thread;
-vector<thread> tree_threads;
+vector<thread> threads_tree;
 uint64_t TF_ID= 0;
 uint64_t QF_ID= 0;
 uint64_t TRAIN_PTS = 0;
 uint64_t TRAIN_DIMS = 0;
 mutex mut_x;
 
-
 /*
 wish to integrate this code in read file...
-pass data numpipe
+//os code for creating and parsing data through dev/numpipe
+
 Course: Operating Systems
 Assignment 3: Character Device
 
@@ -57,26 +57,35 @@ Assignment 3: Character Device
 #include <linux/rtc.h>
 #include <linux/sched.h>
 
+/*defining author, license and description of this module*/
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("GAJJU");
 MODULE_DESCRIPTION("NUMPIPE");
 
+/*defining sempaphore for buffer*/
 static struct semaphore full;
 static struct semaphore empty;
 static struct semaphore read_op_mutex;
 static struct semaphore write_op_mutex;
+/*misc device struct*/
 static struct miscdevice my_device;
+/*number of open devices*/
 static int open_count;
+/*buffer size to store the characters*/
 static int buffer_size;
 
 static int string_char_count = 10000;//string size too
 static int read_index = 0, write_index = 0;
+/*need at least 1 empty slot to READ/write*/
 static int buffer_empty_slots;
 
+/*getting buffer size from command line*/
 module_param(buffer_size, int, 0000);
 
+/*buffer to store strings*/
 char** buffer;
 
+/*declaring fops functions*/
 static ssize_t my_write(struct file*, const char*, size_t, loff_t*);
 static ssize_t my_read(struct file*, char*, size_t, loff_t*);
 static int my_release(struct inode*, struct file*);
@@ -90,11 +99,13 @@ static struct file_operations my_device_fops = {
 };
 
 int init_module(){
-	initializing parameters
+	/*initializing parameters*/
 	
 	my_device.minor = MISC_DYNAMIC_MINOR;
 	my_device.fops = &my_device_fops;
-		int register_return_value;
+	
+	/*registering the device*/
+	int register_return_value;
 	if((register_return_value = misc_register(&my_device))){
 		printk(KERN_ERR "Unable to register the device\n");
 		return register_return_value;
@@ -105,7 +116,8 @@ int init_module(){
 	printk(KERN_INFO "Name: numpipe\n");
 	printk(KERN_INFO "Queue size: %d\n", buffer_size);
 	}
-		int _allocated = 0;
+	/*allocating memory for the buffer. 2d array*/
+	int _allocated = 0;
 	buffer = (char**)kmalloc(buffer_size*sizeof(char*), GFP_KERNEL);
 	while(_allocated < buffer_size){
 		buffer[_allocated] = (char*)kmalloc((string_char_count+1)*sizeof(char), GFP_KERNEL);
@@ -121,9 +133,9 @@ int init_module(){
 	return 0;
 }
 
-cleanup the module
+/*cleanup the module*/
 void cleanup_module(){
-	freeing memor
+	/*freeing memory*/
 	int _iter;
 	for(_iter = 0; _iter < buffer_size; _iter++){
 		kfree(buffer[_iter]);
@@ -179,27 +191,27 @@ static ssize_t my_write(struct file* _file, const char* user_buffer, size_t numb
 	up(&write_op_mutex);
 	return user_queue_index;
 }
-*/
 
+*/
 
 // NO VECTOR OF VECTORS, I SUCK AT THAT, MAKE POINTS NOT VECTORS  //SLOGAN 101
 struct Point 
 {
-		vector<float> coords;
+		vector<float> coordinates;
 		~Point() {}
 };
 
 //QUEUE TO HELP WITH KNN
-class FixedQueue
+class Queue
 {
 	public:
-		FixedQueue(uint64_t sz) : fixed_size{sz} {}
-		~FixedQueue() {}
+		Queue(uint64_t sz) : fixed_size{sz} {}
+		~Queue() {}
 		
 		//stanford notes referred for help in priority queue
 		void insert_if_nearer(pair<Point*, float>);
 		
-		static bool cmpDist(pair<Point*, float> p1, pair<Point*, float> p2)
+		static bool compareDistance(pair<Point*, float> p1, pair<Point*, float> p2)
 		{
 			//figured out this is better than if else
 			return p1.second < p2.second;
@@ -233,22 +245,20 @@ class FixedQueue
 		
 };
 
-void FixedQueue::insert_if_nearer(pair<Point*, float> temp)
+void Queue::insert_if_nearer(pair<Point*, float> temp)
 {
 	// If Queue full, check to see if new point is smaller than biggest entry
-	if (this->neighbours.size() == this->fixed_size)
+	if (this->neighbours.size() == this->fixed_size  &&  temp.second < neighbours[fixed_size-1].second)
 	{
-		if (temp.second < neighbours[fixed_size-1].second)
-		{
-			neighbours[fixed_size-1] = temp;
-			sort(this->neighbours.begin(), this->neighbours.end(), this->cmpDist);
-		}
+		neighbours[fixed_size-1] = temp;
+		sort(this->neighbours.begin(), this->neighbours.end(), this->compareDistance);
+		
 	}
 	// If not full just throw it in there
 	else
 	{
 		this->neighbours.push_back(temp);
-		sort(this->neighbours.begin(), this->neighbours.end(), this->cmpDist);
+		sort(this->neighbours.begin(), this->neighbours.end(), this->compareDistance);
 	}
 }
 
@@ -260,31 +270,35 @@ class Node {
 		
         Node(Point* p) : point{p}, left_child{nullptr}, right_child{nullptr} {}
 		~Node() {}
-		vector<float> get_coords() 
+		vector<float> get_coordinates() 
 		{ 	
-			return point->coords; 
+			return point->coordinates; 
 		}
-		float get_coords(uint64_t i) 
+		float get_coordinates(uint64_t i) 
 		{
-			return point->coords[i]; 
+			return point->coordinates[i]; 
 		}
+	
+		Node* get_right() 
+		{ 
+			return right_child; 
+		}
+		
 		Node* get_left() 
 		{ 
 			return left_child; 
 		}
-		Node* get_right() 
+	
+		void insert_right(Node* child) 
 		{ 
-			return right_child; 
+			this->right_child = child;
 		}
 		void insert_left(Node* child) 
 		{ 
 			this->left_child = child; 
 		}
-		void insert_right(Node* child) 
-		{ 
-			this->right_child = child;
-		}
-		void query(Point *q, Node *n, int dim, FixedQueue* cur_neighbours);
+		
+		void query(Point *q, Node *n, int dimension, Queue* cur_neighbours);
 
 	
 	//aint nobody gonna access that 
@@ -294,18 +308,18 @@ class Node {
 			Node *right_child;
 };
 
-// Implement class to allow passing dimension for comparison in contructor
+// Implement class to allow passing dimension to compare
 
-class cmp 
+class compare 
 {
 	public:
-		cmp(int d) : dim(d) {}
+		compare(int d) : dimension(d) {}
 		bool operator()(Point* p1, Point* p2) 
 		{
-			return p1->coords[dim] < p2->coords[dim];
+			return p1->coordinates[dimension] < p2->coordinates[dimension];
     	}
 	private:
-    	int dim;
+    	int dimension;
 };
 
 // Some useful tools
@@ -319,7 +333,7 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 	// Invalid file handling
 	if(!file)
 	{
-		cout << "No file named " << filename << endl;
+		cout << "No file named " << filename << "exists"<< endl;
 		exit(1);
 	}
 
@@ -327,7 +341,7 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 	// Read in header data from file, 8*8 == 64
 	file.read(buff, 8);
 	string filetype(buff);
-	cout << filetype << endl;
+	//filetype is written up top, no need to do it twice
 
 	file.read(buff, 8);
 	string fid(buff);
@@ -353,7 +367,7 @@ shared_ptr<vector<Point*>> read_training_file(char* filename)
 		{
 			// 8 * 4 == 32
 			file.read(buff, 4);
-			temp->coords.push_back(*((float*) buff));
+			temp->coordinates.push_back(*((float*) buff));
 		}
 		data->push_back(temp);
 	}
@@ -405,7 +419,7 @@ vector<Point*> read_query_file(char* filename)
 	// Create vector of size # training points
 	vector<Point*> data;
 
-	// For each training point, get each dimension, then add it to vector
+	// For each training point, get dimension, then add it to vector
 	for(uint64_t i = 0; i < NUM_QUERIES; i++)
 	{
 		Point* temp = new Point();
@@ -413,7 +427,7 @@ vector<Point*> read_query_file(char* filename)
 		{
 			// Read each 32bit float coordinate dimension
 			file.read(buff, 4);
-			temp->coords.push_back(*((float*) buff));
+			temp->coordinates.push_back(*((float*) buff));
 		}
 		data.push_back(temp);
 	}
@@ -436,6 +450,7 @@ void write_output_file(const char* filename, vector<vector<pair<Point*, float>>>
 	}
 
 	char filetype[8] = "RESULT";
+	//no retyping at cout
 	ifstream random_file ("/dev/urandom", ios::in|ios::binary); // open in binary mode
 	static char buff[8];
 	random_file.read(buff, 8);
@@ -457,7 +472,7 @@ void write_output_file(const char* filename, vector<vector<pair<Point*, float>>>
 		{
 			for(uint64_t j = 0; j < QUERY_DIMS; j++)
 			{
-				outfile.write(reinterpret_cast<const char *> (&((*nearest_neighbours_vec)[q][i].first->coords[j])), sizeof(float));
+				outfile.write(reinterpret_cast<const char *> (&((*nearest_neighbours_vec)[q][i].first->coordinates[j])), sizeof(float));
 			}
 		}
 	}
@@ -465,12 +480,12 @@ void write_output_file(const char* filename, vector<vector<pair<Point*, float>>>
 }
 
 // Returns index of median along given dimension
-int find_median(shared_ptr<vector<Point*>> subarray, int dimension)
+int find_median(shared_ptr<vector<Point*>> subarray, int dimension_median)
 {
 	if (subarray->size() > 1)
 	{
 		// Sort points in array by the values of the current dimension
-		sort(subarray->begin(), subarray->end(), cmp(dimension));
+		sort(subarray->begin(), subarray->end(), compare(dimension_median));
 	}
 	if (subarray->size() % 2 == 0)
 	{
@@ -482,78 +497,89 @@ int find_median(shared_ptr<vector<Point*>> subarray, int dimension)
 	}
 }
 
-void build_left_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-void build_right_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dim);
-void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dim);
+void build_left_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_right_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
+void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dimension);
 
-//merge left and right
 
-void build_left_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_left_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
-	// Add median point as left child to parent
-	Node* split = new Node(median_point);
+	// Add median point as left child
+	split = new Node(median_point);
 	parent->insert_left(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
 	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
 
-	build_left_threaded(split, left, (dim+1) % TRAIN_DIMS);
-	build_right_threaded(split, right, (dim+1) % TRAIN_DIMS);
+	build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+	build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 
 }
 
-void build_right_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_right_non_threaded(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 	
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
-	// Add median point as right child to parent
-	Node* split = new Node(median_point);
+	// Add median point as right child
+	split = new Node(median_point);
 	parent->insert_right(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
 	shared_ptr<vector<Point*>> right (new vector<Point*>(data->begin()+median_index+1, data->end()));
 
-	build_left_threaded(split, left, (dim+1) % TRAIN_DIMS);
-	build_right_threaded(split, right, (dim+1) % TRAIN_DIMS);
+	build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+	build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 }
 
 
-void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 
 	// Add median point as left child to parent
-	Node* split = new Node(median_point);
+	split = new Node(median_point);
 	parent->insert_left(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
@@ -563,34 +589,38 @@ void build_left(Node* parent, shared_ptr<vector<Point*>> data, int dim)
 	unique_lock<mutex> lck(mut_x);
 	if (num_threads < MAX_THREADS)
 	{
-		tree_threads.push_back(thread(build_left, split, left, (dim+1) % TRAIN_DIMS));
+		threads_tree.push_back(thread(build_left, split, left, (dimension+1) % TRAIN_DIMS));
 		num_threads++;
 		lck.unlock();
-		build_right(split, right, (dim+1) % TRAIN_DIMS);
+		build_right(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 	else
 	{
 		lck.unlock();
-		build_left_threaded(split, left, (dim+1) % TRAIN_DIMS);
-		build_right_threaded(split, right, (dim+1) % TRAIN_DIMS);
+		build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+		build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 }
 
-void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dim)
+void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dimension)
 {
 	if (data == nullptr || data->size() == 0)
 	{
 		return;
 	}
+	
+	int median_index;
+	Point* median_point;
+	Node* split;
 
-	int median_index = find_median(data, dim);
+	median_index = find_median(data, dimension);
 	assert(median_index >= 0);
 
-	Point* median_point = (*data)[median_index];
+	median_point = (*data)[median_index];
 	assert(median_point != nullptr);
 	
 	// Add median point as right child
-	Node* split = new Node(median_point);
+	split = new Node(median_point);
 	parent->insert_right(split);
 
 	shared_ptr<vector<Point*>> left (new vector<Point*>(data->begin(), data->begin()+median_index));
@@ -600,17 +630,17 @@ void build_right(Node* parent, shared_ptr<vector<Point*>> data, int dim)
 	unique_lock<mutex> lck(mut_x);
 	if (num_threads < MAX_THREADS)
 	{
-		tree_threads.push_back(thread(build_left, split, left, (dim+1) % TRAIN_DIMS));
+		threads_tree.push_back(thread(build_left, split, left, (dimension+1) % TRAIN_DIMS));
 		num_threads++;
 		lck.unlock();
-		build_right(split, right, (dim+1) % TRAIN_DIMS);
+		build_right(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 	
 	else
 	{
 		lck.unlock();
-		build_left_threaded(split, left, (dim+1) % TRAIN_DIMS);
-		build_right_threaded(split, right, (dim+1) % TRAIN_DIMS);
+		build_left_non_threaded(split, left, (dimension+1) % TRAIN_DIMS);
+		build_right_non_threaded(split, right, (dimension+1) % TRAIN_DIMS);
 	}
 }
 
@@ -625,13 +655,13 @@ void delete_kd_tree(Node* current)
 	}
 }
 
-// Traverse tree to print all nodes
+// Traverse tree to print nodes
 void print_kd_tree(Node* current, string dir, int level)
 {
 	cout << dir << level << ": ";
 	for(uint64_t j = 0; j < TRAIN_DIMS; j++)
 	{
-		 cout << current->get_coords(j) << "  ";
+		 cout << current->get_coordinates(j) << "  ";
 	}
 	cout << endl;
 
@@ -645,19 +675,19 @@ void print_kd_tree(Node* current, string dir, int level)
 	}
 }
 
-float dist(Point* p1, Point* p2)
+float distance(Point* p1, Point* p2)
 {
-	float total = 0.0;
-	float diff = 0.0;
+	float sum = 0.0;
+	float difference = 0.0;
 	for (uint64_t i = 0; i < QUERY_DIMS; i++)
 	{
-		diff = p1->coords[i] - p2->coords[i];
-		total += diff*diff;
+		difference = p1->coordinates[i] - p2->coordinates[i];
+		sum += difference*difference;
 	}
-	return sqrt(total);
+	return sqrt(sum);
 }
 
-void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbours) 
+void Node::query(Point *q, Node *n, int dimension, Queue* cur_neighbours) 
 {
 	if (n == nullptr) 
 	{
@@ -665,18 +695,16 @@ void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbours)
 	}
 
 	// Index of next dimension to consider (one level down).
-	int next_dim = (dim + 1) % TRAIN_DIMS;
+	int next_dim = (dimension + 1) % TRAIN_DIMS;
 
-	float d = dist(q, n->point);
+	float d = distance(q, n->point);
 	cur_neighbours->insert_if_nearer(make_pair(n->point, d));
 
-	if (q->coords[dim] <= n->point->coords[dim]) 
+	if (q->coordinates[dimension] <= n->point->coordinates[dimension]) 
 	{
 		query(q, n->left_child, next_dim, cur_neighbours);
 		
-		// Is the hyperplane closer?
-		
-		if (n->point->coords[dim] - q->coords[dim] < cur_neighbours->get_max() ||
+		if (n->point->coordinates[dimension] - q->coordinates[dimension] < cur_neighbours->get_max() ||
 			cur_neighbours->full_checker()) 
 		{
 			query(q, n->right_child, next_dim, cur_neighbours);
@@ -688,7 +716,7 @@ void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbours)
 	{
 		query(q, n->right_child, next_dim, cur_neighbours);
 		// Is the hyperplane closer?
-		if (q->coords[dim] - n->point->coords[dim] < cur_neighbours->get_max() ||
+		if (q->coordinates[dimension] - n->point->coordinates[dimension] < cur_neighbours->get_max() ||
 			cur_neighbours->full_checker()) 
 		{
 			query(q, n->left_child, next_dim, cur_neighbours);
@@ -696,9 +724,8 @@ void Node::query(Point *q, Node *n, int dim, FixedQueue* cur_neighbours)
 	}
 }
 
-void dispatch_query_threads(int thread_num, vector<Point*>* query_data, 
-					Node* root, vector<FixedQueue*>* fq_vec, 
-					vector<vector<pair<Point*, float>>>* nearest_neighbours_vec)
+void dispatch_query_threads(int thread_num, vector<Point*>* query_data,	Node* root, vector<Queue*>* fq_vec, 
+						vector<vector<pair<Point*, float>>>* nearest_neighbours_vec)
 {
 	uint64_t queries_to_do = num_queries_per_thread[thread_num];
 	uint64_t base = 0;
@@ -709,7 +736,7 @@ void dispatch_query_threads(int thread_num, vector<Point*>* query_data,
 	for (uint64_t q = 0; q < queries_to_do; q++)
 	{
 		uint64_t index = base + q;
-		(*fq_vec)[index] = new FixedQueue(K);
+		(*fq_vec)[index] = new Queue(K);
 		root->query((*query_data)[index], root, 0, (*fq_vec)[index]);
 	 	(*nearest_neighbours_vec)[index] = (*fq_vec)[index]->get_neighbours();
 	}
@@ -726,7 +753,9 @@ int main(int argc, char* argv[])
 	// Assign command-line args
 	int num_cores = atoi(argv[1]); 
 	assert(num_cores > 0);
-	MAX_THREADS = 2 * num_cores;
+	//I had done 2* earlier
+	//thanks dushyant
+	MAX_THREADS = num_cores;
 	char* training_file = argv[2];
 	char* query_file = argv[3];
 	char* results_file = argv[4];
@@ -764,30 +793,26 @@ int main(int argc, char* argv[])
 
 	// Call subfunctions to recursively split each half of the training_data
 	num_threads = 1;
-	tree_threads.push_back(thread(build_left, root, left, 1 % TRAIN_DIMS));
+	threads_tree.push_back(thread(build_left, root, left, 1 % TRAIN_DIMS));
 	build_right(root, right, 1 % TRAIN_DIMS);
 	
 	// Handle cleaning up the threads
-	cout << "\n____BUILDING K-D TREE____" << endl;
+	cout << "\n____BUILDING K-DIMENSION TREE____" << endl;
 
-	while (num_threads != MAX_THREADS)
+	while (num_threads != MAX_THREADS && num_threads != threads_tree.size())
 	{
 		continue;
 	}
-	while (num_threads != tree_threads.size())
-	{
-		continue;
-	}
-
+	
 	cout << "All threads created!" << endl;
 	cout << "Joining Threads now..." << endl;
 
 	for (unsigned int i = 0; i < MAX_THREADS; i++)
 	{
 		//cout << "Joining thread " << i+1 << "/" << MAX_THREADS << endl;
-		if (tree_threads[i].joinable())
+		if (threads_tree[i].joinable())
 		{
-			tree_threads[i].join();
+			threads_tree[i].join();
 		}
 	}
 
@@ -798,7 +823,7 @@ int main(int argc, char* argv[])
 	dt = stop - start;
 	cout << "Time to build Tree: " << dt.count() << endl;
 
-	cout << "\n____QUERYING TREE____" << endl;
+	cout << "\n____QUERYING TREE FOR K NEAREST NEIGHBOURS____" << endl;
 	// CHECKING FILE DATA
 	cout << "Number of query points in vector: " << query_data.size() << endl;
 	assert(query_data.size() == NUM_QUERIES);
@@ -806,8 +831,8 @@ int main(int argc, char* argv[])
 	// vec of vectors. Just hate doing this, but No dynamic arrays now
 	vector<vector<pair<Point*, float>>> nearest_neighbours_vec(NUM_QUERIES);	
 
-	// Priority Queue of pairs based on comparator for distances in pair
-	vector<FixedQueue*> fq_vec(NUM_QUERIES);
+	// Priority Queue of pairs 
+	vector<Queue*> fq_vec(NUM_QUERIES);
 	
 	// Get start time for all queries
 	start = chrono::high_resolution_clock::now();
@@ -838,6 +863,8 @@ int main(int argc, char* argv[])
 	{
 		query_threads.push_back(thread(dispatch_query_threads, i, &query_data, root, &fq_vec, &nearest_neighbours_vec));
 		this_thread::sleep_for(chrono::milliseconds(1));
+		//this_thread::sleep_for(chrono::milliseconds(2));
+		//this_thread::sleep_for(chrono::milliseconds(3));
 	}
 
 	for (i = 0; i < MAX_THREADS; i++)
@@ -861,28 +888,23 @@ int main(int argc, char* argv[])
 	dt = stop - start;
 	cout << "Time to write results file: " << dt.count() << endl;
 
-
 	// CLEAN UP REMAINING POINTERS
-	cout << "\n____CLEANING UP____" << endl;
+	cout << "\n____CLEANING UP THE BUILT STUFF____" << endl;
 	cout << "Deleting training data..." << endl;
 	for (uint64_t i = 0; i < TRAIN_PTS; i++)
 	{
 		delete (*training_data)[i];
 	}
 
-	cout << "Deleting query and nearest neighbor data..." << endl;
+	cout << "DELETING QUERY AND KNN DATA..." << endl;
 	for (uint64_t i = 0; i < NUM_QUERIES; i++)
 	{
 		delete fq_vec[i];
 		delete query_data[i];
 	}
 
-	cout << "Deleting tree data...\n" << endl;
+	cout << "DELETING ENTIRE TREE DATA ...\n" << endl;
 	delete_kd_tree(root);
 	return 0;
 
 }
-
-//emergency bugging
-
-
